@@ -1,0 +1,209 @@
+
+# Atividade Integradora
+
+Membros
+* Bruno
+* Henrique
+* Yuri
+
+
+
+## Importação das principais bibliotecas que serão utilizadas
+
+```{python}
+import pandas as pd
+import numpy as np
+import pandas_profiling as pp
+```
+
+## Criação do dataframe utilizando o pandas como bilbioteca de manipulação de bases
+
+```{python}
+df1 = pd.read_excel("BD_PRE.xlsx")
+```
+
+## Describe 
+
+```{python}
+df1.describe()
+```
+
+## Realizar o drop das colunas que não serão utilizadas no modelo (IDTNS,TIPO,OPERADORA,ESTADO,DATA,H0,Q1,Q2,Q3,Q4,Q5,Q7)
+
+### As variáveis foram retiradas por possuírem valores categóricos e únicos que não seriam interessantes para análise. Pois, sem variância destas features não agregariam em nada para o modelo.
+
+```{python}
+df1=df1.drop(["IDTNS","TIPO","DATA","H0","Q1","Q2","Q3","Q4","Q6","Q7"],axis=1)
+
+df1.head()
+```
+
+## Renomeação da coluna J1 para target facilitando a análise da base
+
+```{python}
+df1 = df1.rename(columns = {'J1':'Target'})
+```
+
+```{python}
+df1.head()
+```
+
+## Realizando a limpeza da base de acordo com o metadados disponibilizada no site do governo. Para cada variável foi feita uma manipulação de dados, no caso abaixo para toda variável em que o valor era 99 foi definida que esta seria missing. 
+
+```{python}
+df2 =  df1.copy()
+```
+
+```{python}
+df2['B1_1'].replace([99], np.NaN,inplace = True)
+df2['B1_2'].replace([99], np.NaN,inplace = True)
+df2['C1_1'].replace([99], np.NaN,inplace = True)
+df2['C1_2'].replace([99], np.NaN,inplace = True)
+df2['D2_1'].replace([99], np.NaN,inplace = True)
+df2['D2_2'].replace([99], np.NaN,inplace = True)
+df2['D2_3'].replace([99], np.NaN,inplace = True)
+df2['F5'].replace([99], np.NaN,inplace = True)
+df2['F4'].replace([99], np.NaN,inplace = True)
+df2['F2'].replace([99], np.NaN,inplace = True)
+df2['A5'].replace([99], np.NaN,inplace = True)
+df2['A4'].replace([99], np.NaN,inplace = True)
+df2['A3'].replace([99], np.NaN,inplace = True)
+df2['A2_1'].replace([99], np.NaN,inplace = True)
+df2['A2_2'].replace([99], np.NaN,inplace = True)
+df2['A2_3'].replace([99], np.NaN,inplace = True)
+df2['E1_1'].replace([99], np.NaN,inplace = True)
+df2['E1_2'].replace([99], np.NaN,inplace = True)
+df2['E1_3'].replace([99], np.NaN,inplace = True)
+df2['F4'].replace([99], np.NaN,inplace = True)
+df2['F5'].replace([99], np.NaN,inplace = True)
+df2['F6'].replace([99], np.NaN,inplace = True)
+```
+
+## Mesmo caso anterior, porém para os outros casos de valores considerados como missing.
+
+```{python}
+df2['Q8'].replace([999999], np.NaN,inplace = True)
+df2['H1'].replace([99,99999], np.NaN,inplace = True)
+df2['H2'].replace([99997,99998,99999,100000,999998,999999], np.NaN,inplace = True)
+```
+
+## A feature H2a foi removida, pois logo após seria criada um novo range de valores de salários nomeada como RIQUEZA
+
+```{python}
+df2.drop(["H2a"],inplace = True,axis = 1)
+```
+
+```{python}
+df3 = df2.copy()
+```
+
+```{python}
+df3.loc[(df3["H2"] >=0) & (df3["H2"] <1000), "RIQUEZA"]=1
+df3.loc[(df3["H2"] >=1000) & (df3["H2"] <3000), "RIQUEZA"]=2
+df3.loc[(df3["H2"] >=3000) & (df3["H2"] <6000), "RIQUEZA"]=3
+df3.loc[(df3["H2"] >=6000) & (df3["H2"] <10000), "RIQUEZA"]=4
+df3.loc[(df3["H2"] >=10000) & (df3["H2"] <15000), "RIQUEZA"]=5
+df3.loc[(df3["H2"] >=15000) & (df3["H2"] <20000), "RIQUEZA"]=6
+df3.loc[(df3["H2"] >=20000), "RIQUEZA"]=7
+```
+
+```{python}
+df3.RIQUEZA.value_counts(dropna =False)
+```
+
+## Target Variable
+
+        No código abaixo, foi definida para os valores de 99 para a Target e logo após todas as linhas que continha Target iguais a missing foram removidas da análise. Além disso, foi criada uma nova variável Target2 definindo se a nota da operadora foi RUIM (0) ou se a nota foi BOA (1).
+
+```{python}
+df3['Target'].replace([99], np.NaN,inplace = True)
+
+df3.loc[(df3["Target"] <=8) ,"Target2"]= 0
+df3.loc[(df3["Target"] >8 ) ,"Target2"]= 1
+
+
+df3.dropna(subset=['Target'],inplace = True)
+
+```
+
+
+```{python}
+df3.describe()
+```
+
+
+Variaveis Categoricas Moda
+Estado  
+Operadora  
+RIQUEZA  
+Q9  
+I1 
+D1     
+Q5    
+F1
+F3  
+F5  
+G1
+
+Variaveis Categoricas Missing Explicito
+A1_x
+
+## No código abaixo identificamos que existiam features em que caso o valor estivesse como missing ele representava igual a 0.
+
+```{python}
+df3["A1_1"].fillna(0,inplace = True)
+df3["A1_2"].fillna(0,inplace = True)
+df3["A1_3"].fillna(0,inplace = True)
+df3["A1_4"].fillna(0,inplace = True)
+df3["F1"].fillna(0,inplace = True)
+df3["F3"].fillna(0,inplace = True)
+df3["F5"].fillna(0,inplace = True)
+```
+
+## Após a correção de todos os valores da base, o código abaixo definiu no dataframe se todas as variáveis que seriam categóricas.
+
+```{python}
+df3['Q9'] = df3['Q9'].astype('category')
+df3['I1'] = df3['I1'].astype('category')
+df3['D1'] = df3['D1'].astype('category')
+df3['Q5'] = df3['Q5'].astype('category')
+df3['F1'] = df3['F1'].astype('category')
+df3['F3'] = df3['F3'].astype('category')
+df3['F5'] = df3['F5'].astype('category')
+df3['G1'] = df3['G1'].astype('category')
+df3["A1_1"] =  df3['A1_1'].astype('category')
+df3["A1_2"] =  df3['A1_2'].astype('category')
+df3["A1_3"] =  df3['A1_3'].astype('category')
+df3["A1_4"] =  df3['A1_4'].astype('category')
+df3["RIQUEZA"] =  df3['RIQUEZA'].astype('category')
+df3["Target2"] =  df3['Target2'].astype('category')
+```
+
+
+
+
+
+```{python}
+df3.dtypes
+```
+
+## Realizar a importação dos modelos que serão utilizados
+
+```{python}
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+```
+
+# Inicio da Modelagem
+
+
+## Separação da base de dados em features e Target
+
+```{python}
+# Para as variáveis que dependiam da resposta de outras, estas foram retiradas da análise. Desta forma, foram apenas contempladas as variáveis que seja indepedentes de outras.
+df4=df3.loc[:,['Q5','Q8','Q8a','Q9','B1_1','B1_2','C1_1','C1_2','D1','D2_1','D2_2','D2_3','E1_1','E1_2','E1_3','A1_1','A1_2','A1_3','A1_4','F1','F3','F5','G1','H1','I1','PESO','RIQUEZA',"Target2"]]
+df4=df4.dropna()
+```
