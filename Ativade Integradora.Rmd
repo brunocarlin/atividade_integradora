@@ -440,5 +440,12 @@ model_lasso <- logistic_reg(mode = "classification") %>%
   
 model_lasso_result_set <- model_lasso %>% 
   mutate(roc_auc_results = map2_dbl(.x = .,.y = splits,.f = cv_roc_auc_calculator))
+
+choosen_one <- model_lasso_result_set %>%
+  rename(model_spec = .) 
+  summarise(mean_roc = mean(roc_auc_results)) %>% 
+  arrange(mean_roc %>% desc()) %>% head(1)
+
+choosen_one
 ```
 
