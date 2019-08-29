@@ -6,6 +6,11 @@ Membros
 * Henrique
 * Yuri
 
+## Set Up chuncks
+
+```{r}
+library(reticulate)
+```
 
 
 ## Importação das principais bibliotecas que serão utilizadas
@@ -13,13 +18,12 @@ Membros
 ```{python}
 import pandas as pd
 import numpy as np
-import pandas_profiling as pp
 ```
 
 ## Criação do dataframe utilizando o pandas como bilbioteca de manipulação de bases
 
 ```{python}
-df1 = pd.read_excel("BD_PRE.xlsx")
+df1 = pd.read_feather("BD_PRE.feather")
 ```
 
 ## Describe 
@@ -197,13 +201,223 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 ```
 
-# Inicio da Modelagem
-
-
 ## Separação da base de dados em features e Target
 
+Para as variáveis que dependiam da resposta de outras, estas foram retiradas da análise. Desta forma, foram apenas contempladas as variáveis que seja indepedentes de outras.
+
 ```{python}
-# Para as variáveis que dependiam da resposta de outras, estas foram retiradas da análise. Desta forma, foram apenas contempladas as variáveis que seja indepedentes de outras.
 df4=df3.loc[:,['Q5','Q8','Q8a','Q9','B1_1','B1_2','C1_1','C1_2','D1','D2_1','D2_2','D2_3','E1_1','E1_2','E1_3','A1_1','A1_2','A1_3','A1_4','F1','F3','F5','G1','H1','I1','PESO','RIQUEZA',"Target2"]]
-df4=df4.dropna()
 ```
+
+```{r}
+df <- py$df4
+```
+
+# Inicio R
+
+```{r}
+library(DataExplorer)
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+DataExplorer::introduce(df)
+```
+
+```{r}
+DataExplorer::plot_intro(df)
+```
+
+```{r}
+plot_missing(df)
+```
+
+```{r}
+df <- df %>% 
+  select(-starts_with("D2"))
+```
+
+```{r}
+plot_missing(df)
+```
+
+```{r}
+#df <- df %>% 
+#  mutate(RIQUEZA = RIQUEZA %>% fct_explicit_na())
+```
+
+```{r}
+df <- df %>% 
+  mutate(response = Target2 %>% fct_recode(bad = "0",good ="1")) %>% 
+  select(-Target2)
+```
+
+```{r}
+df %>% 
+  count(response) %>%
+  ggplot(aes(response, n, fill = response)) + 
+  geom_col(width = .5, show.legend = FALSE) + 
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values = c("red","blue")) +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Distribution of cases"
+  )
+  
+```
+
+
+# Modelagem
+
+```{r}
+telefone_initial_split <- df %>% rsample::initial_split(prop = 0.8)
+telefone_initial_split
+```
+
+```{r}
+train_data <- training(telefone_initial_split)
+test_data <- testing(telefone_initial_split)
+train_data %>% glance()
+```
+
+```{r}
+recipe_telefone <- 
+  recipe(response ~.,data = train_data) %>%
+  step_upsample(response,skip = TRUE) %>% 
+  step_normalize(all_numeric()) %>%
+  step_modeimpute(all_predictors(),-all_numeric()) %>% 
+  step_medianimpute(all_predictors(),-all_nominal()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+```
+
+```{r}
+prepped <- recipe_telefone %>% juice()
+```
+
+```{r}
+recipe_telefone
+```
+
+## Simple model
+
+```{r}
+simple_model_recipe <- recipe_telefone %>%
+  prep(retain = TRUE)
+
+simple_train <- simple_model_recipe %>% juice()
+
+simple_test <- simple_model_recipe %>% bake(test_data)
+
+simple_model_trained <- 
+  logistic_reg(mode = "classification") %>% 
+  fit(response ~.,data = simple_model)
+
+simple_model_trained %>% 
+  predict(simple_test) %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  metrics(truth = response,estimate = .pred_class)
+
+simple_model_trained %>% 
+  predict(simple_test,type = "prob") %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  roc_auc(truth = response,predictor =.pred_bad)
+```
+
+## Cross validation
+
+
+### Create Cross validation dataset
+
+```{r}
+train_data_cv <- train_data %>%
+  rsample::vfold_cv(v = 10)
+```
+
+## Create recipe function
+```{r}
+
+recipe_function <- function(dataset){
+recipe(response ~.,data = dataset) %>%
+  step_upsample(response,skip = TRUE) %>% 
+  step_normalize(all_numeric()) %>%
+  step_modeimpute(all_predictors(),-all_numeric()) %>% 
+  step_medianimpute(all_predictors(),-all_nominal()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  prep(data = dataset,retain = TRUE)
+}
+```
+
+
+
+```{r}
+cv_roc_auc_calculator <- function(cv_model,cv_dataset,cv_recipe = recipe_function) {
+
+analysis_set <- cv_dataset %>% analysis()
+analysis_prepped <- analysis_set %>% cv_recipe
+analysis_juiced <- analysis_prepped %>% juice()
+assessment_baked <- analysis_prepped %>% 
+  bake(split_cv %>% assessment())
+
+model_fit <- cv_model %>% 
+  fit(response ~.,data = analysis_juiced)
+
+roc_auc_result <- model_fit %>% 
+  predict(assessment_baked,type = "prob") %>% 
+  bind_cols(assessment_baked %>% select(response)) %>% 
+  roc_auc(truth = response,predictor =.pred_bad) %>% 
+  pull(.estimate)
+
+return(roc_auc_result)
+}
+```
+
+
+### Testing our function
+
+```{r}
+cv_roc_auc_calculator(cv_model = logistic_reg(mode = "classification"),
+                      cv_dataset = train_data_cv$splits$`1`,
+                      cv_recipe = recipe_function)
+```
+
+
+## Testing a bunch of models
+
+### Lasso
+
+```{r}
+grid_lasso<- grid_random(penalty,
+            mixture %>% value_set(0),
+            size = 16)
+grid_lasso
+```
+
+
+### Ridge
+
+```{r}
+grid_ridge <- grid_random(penalty,
+            mixture %>% value_set(1),
+            size = 16)
+grid_ridge
+```
+
+```{r}
+grid_elastic <- grid_random(penalty,
+            mixture,
+            size = 16)
+grid_elastic
+```
+
+### KNN
+
+```{r}
+grid_knn <- grid_regular(neighbors %>% range_set(c(1,64))
+                         ,levels = 16)
+grid_knn
+```
+
+
+
