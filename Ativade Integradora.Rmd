@@ -293,7 +293,7 @@ recipe_telefone <-
 ```
 
 ```{r}
-prepped <- recipe_telefone %>% juice()
+prepped <- recipe_telefone %>% prep(retain = TRUE) %>%  juice()
 ```
 
 ```{r}
@@ -312,7 +312,7 @@ simple_test <- simple_model_recipe %>% bake(test_data)
 
 simple_model_trained <- 
   logistic_reg(mode = "classification") %>% 
-  fit(response ~.,data = simple_model)
+  fit(response ~.,data = simple_train)
 
 simple_model_trained %>% 
   predict(simple_test) %>% 
@@ -358,7 +358,7 @@ analysis_set <- cv_dataset %>% analysis()
 analysis_prepped <- analysis_set %>% cv_recipe
 analysis_juiced <- analysis_prepped %>% juice()
 assessment_baked <- analysis_prepped %>% 
-  bake(split_cv %>% assessment())
+  bake(cv_dataset %>% assessment())
 
 model_fit <- cv_model %>% 
   fit(response ~.,data = analysis_juiced)
@@ -419,5 +419,26 @@ grid_knn <- grid_regular(neighbors %>% range_set(c(1,64))
 grid_knn
 ```
 
+### Random Forest + Xgboost
 
+```{r}
+grid_forest <- grid_random(trees,
+            mtry %>% range_set(c(1,length(df))),
+            size = 32)
+grid_forest
+```
+
+## Create the tibble with the models
+
+### Models
+
+```{r}
+model_lasso <- logistic_reg(mode = "classification") %>% 
+  set_engine("glmnet") %>% 
+  merge(grid_lasso) %>%
+  crossing(train_data_cv)
+  
+model_lasso_result_set <- model_lasso %>% 
+  mutate(roc_auc_results = map2_dbl(.x = .,.y = splits,.f = cv_roc_auc_calculator))
+```
 
