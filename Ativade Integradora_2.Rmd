@@ -1,0 +1,446 @@
+
+# Atividade Integradora
+
+Membros
+* Bruno
+* Henrique
+* Yuri
+
+## Set Up chuncks
+
+```{r}
+library(reticulate)
+```
+
+
+## Importação das principais bibliotecas que serão utilizadas
+
+```{python}
+import pandas as pd
+import numpy as np
+```
+
+## Criação do dataframe utilizando o pandas como bilbioteca de manipulação de bases
+
+```{python}
+df1 = pd.read_feather("BD_PRE.feather")
+```
+
+## Describe 
+
+```{python}
+df1.describe()
+```
+
+## Realizar o drop das colunas que não serão utilizadas no modelo (IDTNS,TIPO,OPERADORA,ESTADO,DATA,H0,Q1,Q2,Q3,Q4,Q5,Q7)
+
+### As variáveis foram retiradas por possuírem valores categóricos e únicos que não seriam interessantes para análise. Pois, sem variância destas features não agregariam em nada para o modelo.
+
+```{python}
+df1=df1.drop(["IDTNS","TIPO","DATA","H0","Q1","Q2","Q3","Q4","Q6","Q7"],axis=1)
+
+df1.head()
+```
+
+## Renomeação da coluna J1 para target facilitando a análise da base
+
+```{python}
+df1 = df1.rename(columns = {'J1':'Target'})
+```
+
+```{python}
+df1.head()
+```
+
+## Realizando a limpeza da base de acordo com o metadados disponibilizada no site do governo. Para cada variável foi feita uma manipulação de dados, no caso abaixo para toda variável em que o valor era 99 foi definida que esta seria missing. 
+
+```{python}
+df2 =  df1.copy()
+```
+
+```{python}
+df2['B1_1'].replace([99], np.NaN,inplace = True)
+df2['B1_2'].replace([99], np.NaN,inplace = True)
+df2['C1_1'].replace([99], np.NaN,inplace = True)
+df2['C1_2'].replace([99], np.NaN,inplace = True)
+df2['D2_1'].replace([99], np.NaN,inplace = True)
+df2['D2_2'].replace([99], np.NaN,inplace = True)
+df2['D2_3'].replace([99], np.NaN,inplace = True)
+df2['F5'].replace([99], np.NaN,inplace = True)
+df2['F4'].replace([99], np.NaN,inplace = True)
+df2['F2'].replace([99], np.NaN,inplace = True)
+df2['A5'].replace([99], np.NaN,inplace = True)
+df2['A4'].replace([99], np.NaN,inplace = True)
+df2['A3'].replace([99], np.NaN,inplace = True)
+df2['A2_1'].replace([99], np.NaN,inplace = True)
+df2['A2_2'].replace([99], np.NaN,inplace = True)
+df2['A2_3'].replace([99], np.NaN,inplace = True)
+df2['E1_1'].replace([99], np.NaN,inplace = True)
+df2['E1_2'].replace([99], np.NaN,inplace = True)
+df2['E1_3'].replace([99], np.NaN,inplace = True)
+df2['F4'].replace([99], np.NaN,inplace = True)
+df2['F5'].replace([99], np.NaN,inplace = True)
+df2['F6'].replace([99], np.NaN,inplace = True)
+```
+
+## Mesmo caso anterior, porém para os outros casos de valores considerados como missing.
+
+```{python}
+df2['Q8'].replace([999999], np.NaN,inplace = True)
+df2['H1'].replace([99,99999], np.NaN,inplace = True)
+df2['H2'].replace([99997,99998,99999,100000,999998,999999], np.NaN,inplace = True)
+```
+
+## A feature H2a foi removida, pois logo após seria criada um novo range de valores de salários nomeada como RIQUEZA
+
+```{python}
+df2.drop(["H2a"],inplace = True,axis = 1)
+```
+
+```{python}
+df3 = df2.copy()
+```
+
+```{python}
+df3.loc[(df3["H2"] >=0) & (df3["H2"] <1000), "RIQUEZA"]=1
+df3.loc[(df3["H2"] >=1000) & (df3["H2"] <3000), "RIQUEZA"]=2
+df3.loc[(df3["H2"] >=3000) & (df3["H2"] <6000), "RIQUEZA"]=3
+df3.loc[(df3["H2"] >=6000) & (df3["H2"] <10000), "RIQUEZA"]=4
+df3.loc[(df3["H2"] >=10000) & (df3["H2"] <15000), "RIQUEZA"]=5
+df3.loc[(df3["H2"] >=15000) & (df3["H2"] <20000), "RIQUEZA"]=6
+df3.loc[(df3["H2"] >=20000), "RIQUEZA"]=7
+```
+
+```{python}
+df3.RIQUEZA.value_counts(dropna =False)
+```
+
+## Target Variable
+
+        No código abaixo, foi definida para os valores de 99 para a Target e logo após todas as linhas que continha Target iguais a missing foram removidas da análise. Além disso, foi criada uma nova variável Target2 definindo se a nota da operadora foi RUIM (0) ou se a nota foi BOA (1).
+
+```{python}
+df3['Target'].replace([99], np.NaN,inplace = True)
+
+df3.loc[(df3["Target"] <=8) ,"Target2"]= 0
+df3.loc[(df3["Target"] >8 ) ,"Target2"]= 1
+
+
+df3.dropna(subset=['Target'],inplace = True)
+
+```
+
+
+```{python}
+df3.describe()
+```
+
+
+Variaveis Categoricas Moda
+Estado  
+Operadora  
+RIQUEZA  
+Q9  
+I1 
+D1     
+Q5    
+F1
+F3  
+F5  
+G1
+
+Variaveis Categoricas Missing Explicito
+A1_x
+
+## No código abaixo identificamos que existiam features em que caso o valor estivesse como missing ele representava igual a 0.
+
+```{python}
+df3["A1_1"].fillna(0,inplace = True)
+df3["A1_2"].fillna(0,inplace = True)
+df3["A1_3"].fillna(0,inplace = True)
+df3["A1_4"].fillna(0,inplace = True)
+df3["F1"].fillna(0,inplace = True)
+df3["F3"].fillna(0,inplace = True)
+df3["F5"].fillna(0,inplace = True)
+```
+
+## Após a correção de todos os valores da base, o código abaixo definiu no dataframe se todas as variáveis que seriam categóricas.
+
+```{python}
+df3['Q9'] = df3['Q9'].astype('category')
+df3['I1'] = df3['I1'].astype('category')
+df3['D1'] = df3['D1'].astype('category')
+df3['Q5'] = df3['Q5'].astype('category')
+df3['F1'] = df3['F1'].astype('category')
+df3['F3'] = df3['F3'].astype('category')
+df3['F5'] = df3['F5'].astype('category')
+df3['G1'] = df3['G1'].astype('category')
+df3["A1_1"] =  df3['A1_1'].astype('category')
+df3["A1_2"] =  df3['A1_2'].astype('category')
+df3["A1_3"] =  df3['A1_3'].astype('category')
+df3["A1_4"] =  df3['A1_4'].astype('category')
+df3["RIQUEZA"] =  df3['RIQUEZA'].astype('category')
+df3["Target2"] =  df3['Target2'].astype('category')
+```
+
+
+
+
+
+```{python}
+df3.dtypes
+```
+
+## Realizar a importação dos modelos que serão utilizados
+
+```{python}
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+```
+
+## Separação da base de dados em features e Target
+
+Para as variáveis que dependiam da resposta de outras, estas foram retiradas da análise. Desta forma, foram apenas contempladas as variáveis que seja indepedentes de outras.
+
+```{python}
+df4=df3.loc[:,['Q5','Q8','Q8a','Q9','B1_1','B1_2','C1_1','C1_2','D1','D2_1','D2_2','D2_3','E1_1','E1_2','E1_3','A1_1','A1_2','A1_3','A1_4','F1','F3','F5','G1','H1','I1','PESO','RIQUEZA',"Target2"]]
+```
+
+```{r}
+df <- py$df4
+```
+
+# Inicio R
+
+```{r}
+library(DataExplorer)
+library(tidyverse)
+library(tidymodels)
+library(furrr)
+```
+
+```{r}
+DataExplorer::introduce(df)
+```
+
+```{r}
+DataExplorer::plot_intro(df)
+```
+
+```{r}
+plot_missing(df)
+```
+
+```{r}
+df <- df %>% 
+  select(-starts_with("D2"))
+```
+
+```{r}
+plot_missing(df)
+```
+
+```{r}
+#df <- df %>% 
+#  mutate(RIQUEZA = RIQUEZA %>% fct_explicit_na())
+```
+
+```{r}
+  df <- df %>% 
+  mutate(response = Target2 %>% fct_recode(bad = "0",good ="1")) %>% 
+  select(-Target2)
+```
+
+```{r}
+df %>% 
+  count(response) %>%
+  ggplot(aes(response, n, fill = response)) + 
+  geom_col(width = .5, show.legend = FALSE) + 
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values = c("red","blue")) +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Distribution of cases"
+  )
+  
+```
+
+
+# Modelagem
+
+```{r}
+telefone_initial_split <- df %>% rsample::initial_split(prop = 0.9)
+telefone_initial_split
+```
+
+```{r}
+train_data <- training(telefone_initial_split)
+test_data <- testing(telefone_initial_split)
+train_data %>% glance()
+```
+
+```{r}
+recipe_telefone <- 
+  recipe(response ~.,data = train_data) %>%
+  #step_upsample(response,skip = TRUE) %>% 
+  step_normalize(all_numeric()) %>%
+  step_modeimpute(all_predictors(),-all_numeric()) %>% 
+  step_medianimpute(all_predictors(),-all_nominal()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+```
+
+
+
+```{r}
+recipe_telefone %>% prep(retain = TRUE)
+```
+
+## Logistic
+
+```{r}
+simple_model_recipe <- recipe_telefone %>%
+  prep()
+
+simple_train <- simple_model_recipe %>% juice()
+
+simple_test <- simple_model_recipe %>% bake(test_data)
+
+simple_model_trained <- 
+  logistic_reg(mode = "classification",penalty = 0) %>%
+  set_engine("glmnet") %>% 
+  fit(response ~.,data = simple_train)
+
+simple_model_trained %>% 
+  predict(simple_test) %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  metrics(truth = response,estimate = .pred_class)
+
+simple_model_trained %>% 
+  predict(simple_test,type = "prob") %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  roc_auc(truth = response,predictor =.pred_bad)
+```
+
+### Lasso
+
+```{r}
+lasso_regression <- logistic_reg(mode = "classification",mixture = 0) %>% 
+  set_engine("glmnet") %>% 
+  fit(response~ .,data = simple_train)
+
+lasso_regression %>% 
+  multi_predict(new_data = simple_test,type = "prob") %>% 
+  bind_cols(simple_test) %>%
+  unnest() %>% 
+  group_by(penalty) %>% 
+  do(ok = roc_auc(.,truth = response,predictor = .pred_bad)) %>% 
+  unnest() %>%
+  spread(key = .metric,value = .estimate) %>%
+  arrange(roc_auc %>% desc)
+```
+
+### Ridge
+
+```{r}
+ridge_regression <- logistic_reg(mode = "classification",mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  fit(response~ .,data = simple_train)
+
+ridge_regression %>% 
+  multi_predict(new_data = simple_test,type = "prob") %>% 
+  bind_cols(simple_test) %>%
+  unnest() %>% 
+  group_by(penalty) %>% 
+  do(ok = roc_auc(.,truth = response,predictor = .pred_bad)) %>% 
+  unnest() %>%
+  spread(key = .metric,value = .estimate) %>%
+  arrange(roc_auc %>% desc)
+```
+
+## KNN
+
+```{r}
+knn_regression <- nearest_neighbor(mode = "classification") %>% 
+  set_engine("kknn") %>% 
+  fit(response~ .,data = simple_train)
+
+knn_regression %>% 
+  multi_predict(new_data = simple_test,type = "prob") %>% 
+  bind_cols(simple_test) %>%
+  unnest() %>% 
+  group_by(penalty) %>% 
+  do(ok = roc_auc(.,truth = response,predictor = .pred_bad)) %>% 
+  unnest() %>%
+  spread(key = .metric,value = .estimate) %>%
+  arrange(roc_auc %>% desc)
+```
+
+## h2o
+
+```{r}
+library(h2o)
+
+h2o.init(nthreads = 2)
+```
+
+```{r}
+simple_train_hex = as.h2o(simple_train)
+```
+
+```{r}
+aml <- h2o.automl(y = "response",
+                  training_frame = simple_train_hex,
+                  max_models = 20,
+                  seed = 1)
+```
+
+
+```{r}
+summary(aml)
+```
+
+```{r}
+simple_test_hex = as.h2o(simple_test)
+```
+
+```{r}
+pred <- h2o.predict(aml, simple_test_hex)
+```
+
+
+```{r}
+pred
+```
+
+
+```{r}
+model_ids <- as.data.frame(aml@leaderboard$model_id)[,1]
+model_ids
+```
+
+###
+```{r}
+m <- h2o.getModel(model_ids[2])
+```
+```{r}
+m
+```
+
+```{r}
+result_predictions <- predict(m,simple_test_hex)
+
+result_predictions %>% 
+  as_tibble() %>% 
+  bind_cols(simple_test) %>% 
+  metrics(truth = response,estimate = predict)
+
+result_predictions %>% 
+  as_tibble() %>% 
+  bind_cols(simple_test) %>% 
+  roc_auc(truth = response,predictor = good)
+```
+
