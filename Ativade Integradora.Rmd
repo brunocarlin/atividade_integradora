@@ -219,6 +219,7 @@ df <- py$df4
 library(DataExplorer)
 library(tidyverse)
 library(tidymodels)
+library(furrr)
 ```
 
 ```{r}
@@ -248,7 +249,7 @@ plot_missing(df)
 ```
 
 ```{r}
-df <- df %>% 
+  df <- df %>% 
   mutate(response = Target2 %>% fct_recode(bad = "0",good ="1")) %>% 
   select(-Target2)
 ```
@@ -292,12 +293,14 @@ recipe_telefone <-
   step_dummy(all_nominal(), -all_outcomes())
 ```
 
+
+
 ```{r}
-prepped <- recipe_telefone %>% prep(retain = TRUE) %>%  juice()
+recipe_telefone %>% prep(retain = TRUE)
 ```
 
 ```{r}
-recipe_telefone
+prepped <- recipe_telefone %>% prep(retain = TRUE) %>%  juice()
 ```
 
 ## Simple model
@@ -311,7 +314,8 @@ simple_train <- simple_model_recipe %>% juice()
 simple_test <- simple_model_recipe %>% bake(test_data)
 
 simple_model_trained <- 
-  logistic_reg(mode = "classification") %>% 
+  logistic_reg(mode = "classification",penalty = 0) %>%
+  set_engine("glmnet") %>% 
   fit(response ~.,data = simple_train)
 
 simple_model_trained %>% 
@@ -332,7 +336,7 @@ simple_model_trained %>%
 
 ```{r}
 train_data_cv <- train_data %>%
-  rsample::vfold_cv(v = 10)
+  rsample::vfold_cv(v = 5)
 ```
 
 ## Create recipe function
@@ -369,10 +373,9 @@ roc_auc_result <- model_fit %>%
   roc_auc(truth = response,predictor =.pred_bad) %>% 
   pull(.estimate)
 
-return(roc_auc_result)
+return(list(model_fit = model_fit,roc_auc_result = roc_auc_result))
 }
 ```
-
 
 ### Testing our function
 
@@ -424,7 +427,7 @@ grid_knn
 ```{r}
 grid_forest <- grid_random(trees,
             mtry %>% range_set(c(1,length(df))),
-            size = 32)
+            size = 16)
 grid_forest
 ```
 
@@ -432,20 +435,145 @@ grid_forest
 
 ### Models
 
+#### Lasso grid_knn
+
+# ```{r}
+#  model_lasso <- logistic_reg(mode = "classification") %>%
+#    set_engine("glmnet") %>%
+#    merge(grid_lasso) %>%
+#    crossing(train_data_cv) %>%
+#    rename(model_spec = 1)
+# 
+# plan(multicore,workers = 2)
+#  model_lasso_result_set <- model_lasso %>%
+#    head(4) %>% 
+#    mutate(roc_auc_results = future_map2(.x = model_spec,.y = splits,.f = cv_roc_auc_calculator))
+# 
+#  results_table <- model_lasso_result_set %>%
+#    pull(roc_auc_results) %>%
+#    transpose() %>%
+#    as_tibble() %>%
+#    mutate(roc_auc_result = roc_auc_result %>% unlist())
+# 
+#  models_results <- results_table %>% bind_cols(model_lasso_result_set)
+# 
+#  cv_results <- models_results %>%
+#    group_by(model_spec %>% as.character()) %>%
+#    mutate(mean_cv = mean(roc_auc_result)) %>%
+#    arrange(mean_cv %>% desc) %>%
+#    ungroup()
+# 
+#  cv_results_best <- cv_results %>% head(1)
+# 
+#  cv_results_best %>% pull(model_spec)
+# 
+#  cv_results_best %>%
+#    pull(model_fit) %>%
+#    pluck(1) %>%
+#    pluck(2)
+# 
+#  cv_results_best %>% pull(mean_cv)
+# 
+#  cv_results_best %>%
+#    pull(model_fit) %>%
+#    pluck(1) %>%
+#    predict(simple_test) %>%
+#    bind_cols(simple_test %>% select(response)) %>%
+#    metrics(truth = response,estimate = .pred_class)
+# 
+#  cv_results_best %>%
+#    pull(model_fit) %>%
+#    pluck(1) %>%
+#    predict(simple_test,type = "prob") %>%
+#    bind_cols(simple_test %>% select(response)) %>%
+#    roc_auc(truth = response,predictor =.pred_bad)
+# ```
+
+
 ```{r}
-model_lasso <- logistic_reg(mode = "classification") %>% 
-  set_engine("glmnet") %>% 
-  merge(grid_lasso) %>%
-  crossing(train_data_cv)
-  
-model_lasso_result_set <- model_lasso %>% 
-  mutate(roc_auc_results = map2_dbl(.x = .,.y = splits,.f = cv_roc_auc_calculator))
+evaluate_model <- function(model,grid,training_data,testing_data) {
+model_cross <- model %>% 
+  merge(grid) %>%
+  crossing(training_data) %>%
+  rename(model_spec = 1)
 
-choosen_one <- model_lasso_result_set %>%
-  rename(model_spec = .) 
-  summarise(mean_roc = mean(roc_auc_results)) %>% 
-  arrange(mean_roc %>% desc()) %>% head(1)
+plan(multicore, workers = 8)
 
-choosen_one
+model_result_set <- model_cross %>%
+  mutate(roc_auc_results = future_map2(.x = model_spec,.y = splits,.f = cv_roc_auc_calculator))
+
+results_table <- model_result_set %>%
+  pull(roc_auc_results) %>%
+  transpose() %>%
+  as_tibble() %>% 
+  mutate(roc_auc_result = roc_auc_result %>% unlist())
+
+models_results <- results_table %>% bind_cols(model_lasso_result_set)
+
+cv_results <- models_results %>% 
+  group_by(model_spec %>% as.character()) %>% 
+  mutate(mean_cv = mean(roc_auc_result)) %>%
+  arrange(mean_cv %>% desc) %>% 
+  ungroup()
+
+cv_results_best <- cv_results %>% head(1)
+
+best_fit <- cv_results_best %>% pull(model_spec)
+
+best_cv_roc <- cv_results_best %>% pull(mean_cv)
+
+best_metrics <- cv_results_best %>%
+  pull(model_fit) %>%
+  pluck(1) %>% 
+  predict(simple_test) %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  metrics(truth = response,estimate = .pred_class)
+
+best_roc <- cv_results_best %>%
+  pull(model_fit) %>%
+  pluck(1) %>% 
+  predict(simple_test,type = "prob") %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  roc_auc(truth = response,predictor =.pred_bad)
+
+return(list(best_fit = best_fit,best_cv_roc = best_cv_roc,best_metrics = best_metrics,best_roc = best_roc))
+}
+```
+
+```{r}
+lasso_evaluation <- evaluate_model(model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),grid = grid_lasso,training_data = train_data_cv,testing_data = simple_test)
+```
+
+
+
+##### Ridge
+
+```{r}
+ridge_evaluation <- evaluate_model(model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),grid = grid_ridge,training_data = train_data_cv,testing_data = simple_test)
+```
+
+
+##### Elastic
+
+```{r}
+elastic_evaluation <- evaluate_model(model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),grid = grid_elastic,training_data = train_data_cv,testing_data = simple_test)
+```
+
+#### KNN
+
+```{r}
+knn_evaluation <- evaluate_model(model = nearest_neighbor(mode = "classification") %>% set_engine("kknn"),grid = grid_knn,training_data = train_data_cv,testing_data = simple_test)
+```
+
+##### Random Forest
+
+```{r}
+random_forest_evaluation <- evaluate_model(model = rand_forest(mode = "classification") %>% set_engine("ranger"),grid = grid_forest,training_data = train_data_cv,testing_data = simple_test)
+```
+
+#### Boosting
+
+```{r}
+boosting_evaluation <- evaluate_model(model = boost_tree(mode = "classification") %>% set_engine("xgboost"),grid = grid_forest,training_data = train_data_cv,testing_data = simple_test)
 ```
 
