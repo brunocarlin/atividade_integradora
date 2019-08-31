@@ -1,13 +1,13 @@
-
 # Atividade Integradora
 
 Membros
 
 * Bruno  
 * Henrique  
-* Yuri
+* Yuri 
   
 ## Set Up chuncks
+
 ```{r setup}
 knitr::opts_chunk$set(
 	echo = TRUE,
@@ -223,7 +223,7 @@ df <- py$df4
 
 # Inicio R
 
-```{r}
+```{r,results='hide'}
 library(DataExplorer)
 library(tidyverse)
 library(tidymodels)
@@ -317,7 +317,7 @@ recipe_telefone %>% prep(retain = TRUE)
 
 ## Logistic
 
-```{r}
+```{r,results='hide'}
 simple_model_recipe <- recipe_telefone %>%
   prep(retain = TRUE)
 
@@ -330,25 +330,33 @@ logistic_regression <-
   set_engine("glmnet") %>% 
   fit(response ~.,data = simple_train)
 
-logistic_regression %>% 
+metrics_log_reg <- logistic_regression %>% 
   predict(simple_test) %>% 
   bind_cols(simple_test %>% select(response)) %>% 
   metrics(truth = response,estimate = .pred_class)
 
-logistic_regression %>% 
+metrics_roc_auc <- logistic_regression %>% 
   predict(simple_test,type = "prob") %>% 
   bind_cols(simple_test %>% select(response)) %>% 
   roc_auc(truth = response,predictor =.pred_0)
 ```
 
-## Lasso
+```{r}
+metrics_log_reg
+```
 
 ```{r}
+metrics_roc_auc
+```
+
+## Lasso
+
+```{r,results='hide'}
 lasso_regression <- logistic_reg(mode = "classification",mixture = 0) %>% 
   set_engine("glmnet") %>% 
   fit(response~ .,data = simple_train)
 
-lasso_regression %>% 
+lasso_roc_auc_cv <- lasso_regression %>% 
   multi_predict(new_data = simple_test,type = "prob") %>% 
   bind_cols(simple_test) %>%
   unnest() %>% 
@@ -359,14 +367,19 @@ lasso_regression %>%
   arrange(roc_auc %>% desc)
 ```
 
+```{r}
+lasso_roc_auc_cv
+```
+
+
 ## Ridge
 
-```{r}
+```{r,results='hide'}
 ridge_regression <- logistic_reg(mode = "classification",mixture = 1) %>% 
   set_engine("glmnet") %>% 
   fit(response~ .,data = simple_train)
 
-ridge_regression %>% 
+rdige_results_cv <- ridge_regression %>% 
   multi_predict(new_data = simple_test,type = "prob") %>% 
   bind_cols(simple_test) %>%
   unnest() %>% 
@@ -375,6 +388,10 @@ ridge_regression %>%
   unnest() %>%
   spread(key = .metric,value = .estimate) %>%
   arrange(roc_auc %>% desc)
+```
+
+```{r}
+rdige_results_cv
 ```
 
 ## Random Forest
@@ -383,12 +400,16 @@ ridge_regression %>%
   random_forest <- rand_forest(mode = "classification",trees = 100) %>% 
   set_engine("ranger") %>% 
   fit(response~ .,data = simple_train)
+```
 
+```{r}
 random_forest %>% 
     predict(simple_test) %>% 
     bind_cols(simple_test %>% select(response)) %>% 
     metrics(truth = response,estimate = .pred_class)
+```
 
+```{r}
 random_forest %>% 
   predict(simple_test,type = "prob") %>% 
   bind_cols(simple_test %>% select(response)) %>% 
@@ -408,7 +429,7 @@ h2o.init(nthreads = 12,max_mem_size = "8g")
 
 ### Upload df's
 
-```{r}
+```{r,results='hide'}
 simple_train_hex <-  as.h2o(simple_train)
 simple_test_hex = as.h2o(simple_test)
 simple_y_hex <- simple_train %>% select(response) %>% pull %>% as.numeric()
@@ -419,7 +440,7 @@ simple_x_hex <- simple_train %>% select(-response)
 
 ### Fit auto ml
 
-```{r}
+```{r,results='hide'}
 aml <- h2o.automl(y = "response",
                   training_frame = simple_train_hex,
                   max_runtime_secs = 600,
@@ -432,8 +453,11 @@ aml <- h2o.automl(y = "response",
 summary(aml)
 ```
 
-```{r}
+```{r,results='hide'}
 pred <- h2o.predict(aml, simple_test_hex)
+```
+
+```{r}
 pred
 ```
 
@@ -458,9 +482,11 @@ best_h2o
 
 ### Performance
 
-```{r}
+```{r,results='hide'}
 result_predictions <- predict(best_h2o,simple_test_hex)
+```
 
+```{r}
 result_predictions %>% 
   as_tibble() %>% 
   bind_cols(simple_test) %>% 
@@ -489,11 +515,13 @@ y_dalex <- y_dalex[,1]
 
 ## Model Performance
 
-```{r}
+```{r,results='hide'}
 explainer_h20 <- DALEX::explain(best_h2o,x_dalex,y_dalex,label = "h20_model")
 explainer_log_reg <- DALEX::explain(logistic_regression, data=x_dalex, y=y_dalex, label="logistic_reg")
 explainer_rf <- explain(random_forest,x_dalex,y_dalex,label ="random_forest")
+```
 
+```{r}
 mp_h2o <- model_performance(explainer_h20)
 mp_log_reg <- model_performance(explainer_log_reg)
 mp_rf <- model_performance(explainer_rf)
@@ -506,11 +534,13 @@ plot(mp_h2o,mp_log_reg,mp_rf, geom = "boxplot")
 
 ## Feature Importance
 
-```{r}
+```{r,results='hide'}
 fi_h20 <- feature_importance(explainer_h20)
 fi_log_reg <- feature_importance(explainer_log_reg)
 fi_rf <- feature_importance(explainer_rf)
+```
 
+```{r}
 describe(fi_h20)
 plot(fi_h20,fi_log_reg,fi_rf)
 ```
@@ -521,11 +551,13 @@ plot(fi_h20,fi_log_reg,fi_rf)
 
 Nota atribuída com respeito ao comprometimento da operadora em cumprir o que foi prometido e divulgado em sua publicidade.
 
-```{r}
+```{r,results='hide'}
 adp_h2o <- accumulated_dependency(explainer_h20,variables = "B1_2")
 adp_log_reg <- accumulated_dependency(explainer_log_reg,variables = "B1_2")
 adp_rf <- accumulated_dependency(explainer_rf,variables = "B1_2")
+```
 
+```{r}
 plot(adp_h2o,adp_log_reg,adp_rf)
 ```
 
@@ -539,22 +571,29 @@ G1: Existência de outra operadora que ofereça o mesmo serviço da atual, no lo
 3. Não sabe
 
 
-```{r}
+```{r,results='hide'}
 expl_h2o <- variable_response(explainer_h20,variable = "G1", type = "factor")
 expl_log_reg <- variable_response(explainer_log_reg,variable = "G1", type = "factor")
 expl_rf<- variable_response(explainer_rf,variable = "G1", type = "factor")
+```
 
+```{r}
 plot(expl_h2o,expl_log_reg,expl_rf)
 ```
 
+
 ## Single prediction explanation 
 
-```{r}
+```{r,results='hide'}
 bd_h2o <- break_down(explainer_h20, x_dalex[1,])
 bd_log_reg <- break_down(explainer_log_reg, x_dalex[1,])
 bd_rf <- break_down(explainer_rf, x_dalex[1,])
+```
 
+
+```{r}
 plot(bd_h2o)
 plot(bd_log_reg)
 plot(bd_rf)
 ```
+
