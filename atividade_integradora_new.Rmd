@@ -2,11 +2,19 @@
 # Atividade Integradora
 
 Membros
-* Bruno
-* Henrique
-* Yuri
 
+* Bruno  
+* Henrique  
+* Yuri
+  
 ## Set Up chuncks
+```{r setup}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+	)
+```
 
 ```{r}
 library(reticulate)
@@ -220,6 +228,10 @@ library(DataExplorer)
 library(tidyverse)
 library(tidymodels)
 library(furrr)
+library(h2o)
+library(DALEX)
+library(iBreakDown)
+library(ingredients)
 ```
 
 ```{r}
@@ -250,12 +262,17 @@ plot_missing(df)
 
 ```{r}
   df <- df %>% 
-  mutate(response = Target2 %>% fct_recode(bad = "0",good ="1")) %>% 
-  select(-Target2)
+  rename(response = Target2) %>% 
+  select(-PESO)
 ```
 
 ```{r}
-df %>% 
+  df2 <- df %>% 
+  mutate(response = response %>% fct_recode(bad = "0",good ="1"))
+```
+
+```{r}
+df2 %>% 
   count(response) %>%
   ggplot(aes(response, n, fill = response)) + 
   geom_col(width = .5, show.legend = FALSE) + 
@@ -273,24 +290,23 @@ df %>%
 # Modelagem
 
 ```{r}
-telefone_initial_split <- df %>% rsample::initial_split(prop = 0.8)
+telefone_initial_split <- df %>% rsample::initial_split(prop = 0.9)
 telefone_initial_split
 ```
 
 ```{r}
 train_data <- training(telefone_initial_split)
 test_data <- testing(telefone_initial_split)
-train_data %>% glance()
 ```
 
 ```{r}
 recipe_telefone <- 
   recipe(response ~.,data = train_data) %>%
-  step_upsample(response,skip = TRUE) %>% 
+  #step_upsample(response,skip = TRUE) %>% 
   step_normalize(all_numeric()) %>%
   step_modeimpute(all_predictors(),-all_numeric()) %>% 
-  step_medianimpute(all_predictors(),-all_nominal()) %>%
-  step_dummy(all_nominal(), -all_outcomes())
+  step_medianimpute(all_predictors(),-all_nominal()) #%>% 
+  #step_dummy(all_predictors(),-all_numeric())
 ```
 
 
@@ -299,11 +315,7 @@ recipe_telefone <-
 recipe_telefone %>% prep(retain = TRUE)
 ```
 
-```{r}
-prepped <- recipe_telefone %>% prep(retain = TRUE) %>%  juice()
-```
-
-## Simple model
+## Logistic
 
 ```{r}
 simple_model_recipe <- recipe_telefone %>%
@@ -313,307 +325,236 @@ simple_train <- simple_model_recipe %>% juice()
 
 simple_test <- simple_model_recipe %>% bake(test_data)
 
-simple_model_trained <- 
+logistic_regression <- 
   logistic_reg(mode = "classification",penalty = 0) %>%
   set_engine("glmnet") %>% 
   fit(response ~.,data = simple_train)
 
-simple_model_trained %>% 
+logistic_regression %>% 
   predict(simple_test) %>% 
   bind_cols(simple_test %>% select(response)) %>% 
   metrics(truth = response,estimate = .pred_class)
 
-simple_model_trained %>% 
+logistic_regression %>% 
   predict(simple_test,type = "prob") %>% 
   bind_cols(simple_test %>% select(response)) %>% 
-  roc_auc(truth = response,predictor =.pred_bad)
+  roc_auc(truth = response,predictor =.pred_0)
 ```
 
-## Cross validation
-
-
-### Create Cross validation dataset
+## Lasso
 
 ```{r}
-train_data_cv <- train_data %>%
-  rsample::vfold_cv(v = 5)
+lasso_regression <- logistic_reg(mode = "classification",mixture = 0) %>% 
+  set_engine("glmnet") %>% 
+  fit(response~ .,data = simple_train)
+
+lasso_regression %>% 
+  multi_predict(new_data = simple_test,type = "prob") %>% 
+  bind_cols(simple_test) %>%
+  unnest() %>% 
+  group_by(penalty) %>% 
+  do(ok = roc_auc(.,truth = response,predictor = .pred_0)) %>% 
+  unnest() %>%
+  spread(key = .metric,value = .estimate) %>%
+  arrange(roc_auc %>% desc)
 ```
 
-## Create recipe function
-```{r}
+## Ridge
 
-recipe_function <- function(dataset){
-recipe(response ~.,data = dataset) %>%
-  step_upsample(response,skip = TRUE) %>% 
-  step_normalize(all_numeric()) %>%
-  step_modeimpute(all_predictors(),-all_numeric()) %>% 
-  step_medianimpute(all_predictors(),-all_nominal()) %>%
-  step_dummy(all_nominal(), -all_outcomes()) %>% 
-  prep(data = dataset,retain = TRUE)
-}
+```{r}
+ridge_regression <- logistic_reg(mode = "classification",mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  fit(response~ .,data = simple_train)
+
+ridge_regression %>% 
+  multi_predict(new_data = simple_test,type = "prob") %>% 
+  bind_cols(simple_test) %>%
+  unnest() %>% 
+  group_by(penalty) %>% 
+  do(ok = roc_auc(.,truth = response,predictor = .pred_0)) %>% 
+  unnest() %>%
+  spread(key = .metric,value = .estimate) %>%
+  arrange(roc_auc %>% desc)
 ```
 
-
+## Random Forest
 
 ```{r}
-cv_roc_auc_calculator <- function(cv_model,cv_dataset,cv_recipe = recipe_function) {
+  random_forest <- rand_forest(mode = "classification",trees = 100) %>% 
+  set_engine("ranger") %>% 
+  fit(response~ .,data = simple_train)
 
-analysis_set <- cv_dataset %>% analysis()
-analysis_prepped <- analysis_set %>% cv_recipe
-analysis_juiced <- analysis_prepped %>% juice()
-assessment_baked <- analysis_prepped %>% 
-  bake(cv_dataset %>% assessment())
+random_forest %>% 
+    predict(simple_test) %>% 
+    bind_cols(simple_test %>% select(response)) %>% 
+    metrics(truth = response,estimate = .pred_class)
 
-model_fit <- cv_model %>% 
-  fit(response ~.,data = analysis_juiced)
-
-roc_auc_result <- model_fit %>% 
-  predict(assessment_baked,type = "prob") %>% 
-  bind_cols(assessment_baked %>% select(response)) %>% 
-  roc_auc(truth = response,predictor =.pred_bad) %>% 
-  pull(.estimate)
-
-return(list(model_fit = model_fit,roc_auc_result = roc_auc_result))
-}
+random_forest %>% 
+  predict(simple_test,type = "prob") %>% 
+  bind_cols(simple_test %>% select(response)) %>% 
+  roc_auc(truth = response,predictor =.pred_0)
 ```
 
-### Testing our function
+## h2o
+
+### Start CLuster
 
 ```{r}
-cv_roc_auc_calculator(cv_model = logistic_reg(mode = "classification"),
-                      cv_dataset = train_data_cv$splits$`1`,
-                      cv_recipe = recipe_function)
-```
-
-
-## Testing a bunch of models
-
-### Lasso
-
-```{r}
-grid_lasso<- grid_random(penalty,
-            mixture %>% value_set(0),
-            size = 16)
-grid_lasso
+library(h2o)
+library(DALEXtra)
+h2o.init(nthreads = 12,max_mem_size = "8g")
 ```
 
 
-### Ridge
+### Upload df's
 
 ```{r}
-grid_ridge <- grid_random(penalty,
-            mixture %>% value_set(1),
-            size = 16)
-grid_ridge
+simple_train_hex <-  as.h2o(simple_train)
+simple_test_hex = as.h2o(simple_test)
+simple_y_hex <- simple_train %>% select(response) %>% pull %>% as.numeric()
+simple_x_hex <- simple_train %>% select(-response)
+```
+
+
+
+### Fit auto ml
+
+```{r}
+aml <- h2o.automl(y = "response",
+                  training_frame = simple_train_hex,
+                  max_runtime_secs = 600,
+                        seed = 1)
+```
+
+### Model results
+
+```{r}
+summary(aml)
 ```
 
 ```{r}
-grid_elastic <- grid_random(penalty,
-            mixture,
-            size = 16)
-grid_elastic
+pred <- h2o.predict(aml, simple_test_hex)
+pred
 ```
 
-### KNN
-
 ```{r}
-grid_knn <- grid_regular(neighbors %>% range_set(c(1,64))
-                         ,levels = 16)
-grid_knn
+aml@leaderboard
 ```
 
-### Random Forest + Xgboost
-
 ```{r}
-grid_forest <- grid_random(trees,
-            mtry %>% range_set(c(1,length(df))),
-            size = 16)
-grid_forest
+model_ids <- as.data.frame(aml@leaderboard$model_id)[,1]
+model_ids
 ```
 
-## Create the tibble with the models
-
-### Models
-
-#### Lasso grid_knn
-
-# ```{r}
-#  model_lasso <- logistic_reg(mode = "classification") %>%
-#    set_engine("glmnet") %>%
-#    merge(grid_lasso) %>%
-#    crossing(train_data_cv) %>%
-#    rename(model_spec = 1)
-# 
-# plan(multicore,workers = 2)
-#  model_lasso_result_set <- model_lasso %>%
-#    head(4) %>% 
-#    mutate(roc_auc_results = future_map2(.x = model_spec,.y = splits,.f = cv_roc_auc_calculator))
-# 
-#  results_table <- model_lasso_result_set %>%
-#    pull(roc_auc_results) %>%
-#    transpose() %>%
-#    as_tibble() %>%
-#    mutate(roc_auc_result = roc_auc_result %>% unlist())
-# 
-#  models_results <- results_table %>% bind_cols(model_lasso_result_set)
-# 
-#  cv_results <- models_results %>%
-#    group_by(model_spec %>% as.character()) %>%
-#    mutate(mean_cv = mean(roc_auc_result)) %>%
-#    arrange(mean_cv %>% desc) %>%
-#    ungroup()
-# 
-#  cv_results_best <- cv_results %>% head(1)
-# 
-#  cv_results_best %>% pull(model_spec)
-# 
-#  cv_results_best %>%
-#    pull(model_fit) %>%
-#    pluck(1) %>%
-#    pluck(2)
-# 
-#  cv_results_best %>% pull(mean_cv)
-# 
-#  cv_results_best %>%
-#    pull(model_fit) %>%
-#    pluck(1) %>%
-#    predict(simple_test) %>%
-#    bind_cols(simple_test %>% select(response)) %>%
-#    metrics(truth = response,estimate = .pred_class)
-# 
-#  cv_results_best %>%
-#    pull(model_fit) %>%
-#    pluck(1) %>%
-#    predict(simple_test,type = "prob") %>%
-#    bind_cols(simple_test %>% select(response)) %>%
-#    roc_auc(truth = response,predictor =.pred_bad)
-# ```
-
+### Using a stacked model
 
 ```{r}
-evaluate_model <- function(model,grid,training_data,testing_data) {
-model_cross <- model %>% 
-  merge(grid) %>%
-  crossing(training_data) %>%
-  rename(model_spec = 1)
+best_h2o <- h2o.getModel(model_ids[model_ids %>% str_detect("StackedEnsemble_BestOfFamily_AutoML")])
+```
 
-plan(multicore, workers = 8)
+```{r}
+best_h2o
+```
 
-model_result_set <- model_cross %>%
-  mutate(roc_auc_results = future_map2(.x = model_spec,.y = splits,.f = cv_roc_auc_calculator))
+### Performance
 
-results_table <- model_result_set %>%
-  pull(roc_auc_results) %>%
-  transpose() %>%
+```{r}
+result_predictions <- predict(best_h2o,simple_test_hex)
+
+result_predictions %>% 
   as_tibble() %>% 
-  mutate(roc_auc_result = roc_auc_result %>% unlist())
+  bind_cols(simple_test) %>% 
+  metrics(truth = response,estimate = predict)
 
-models_results <- results_table %>% bind_cols(model_lasso_result_set)
+result_predictions %>% 
+  as_tibble() %>% 
+  bind_cols(simple_test) %>% 
+  roc_auc(truth = response,predictor = p0)
+```
 
-cv_results <- models_results %>% 
-  group_by(model_spec %>% as.character()) %>% 
-  mutate(mean_cv = mean(roc_auc_result)) %>%
-  arrange(mean_cv %>% desc) %>% 
-  ungroup()
+# DALEX - Black Box?
 
-cv_results_best <- cv_results %>% head(1)
 
-best_fit <- cv_results_best %>% pull(model_spec)
+## Dalex X e Y
+```{r}
+x_dalex <- simple_test %>% select(-response)
+y_dalex <- simple_test %>%
+  transmute(response = response %>%
+              as.numeric()) %>% 
+  mutate(response = if_else(response == 1,
+                            0,
+                            1)) %>% as.data.frame()
+y_dalex <- y_dalex[,1]
+```
 
-best_cv_roc <- cv_results_best %>% pull(mean_cv)
+## Model Performance
 
-best_metrics <- cv_results_best %>%
-  pull(model_fit) %>%
-  pluck(1) %>% 
-  predict(simple_test) %>% 
-  bind_cols(simple_test %>% select(response)) %>% 
-  metrics(truth = response,estimate = .pred_class)
+```{r}
+explainer_h20 <- DALEX::explain(best_h2o,x_dalex,y_dalex,label = "h20_model")
+explainer_log_reg <- DALEX::explain(logistic_regression, data=x_dalex, y=y_dalex, label="logistic_reg")
+explainer_rf <- explain(random_forest,x_dalex,y_dalex,label ="random_forest")
 
-best_roc <- cv_results_best %>%
-  pull(model_fit) %>%
-  pluck(1) %>% 
-  predict(simple_test,type = "prob") %>% 
-  bind_cols(simple_test %>% select(response)) %>% 
-  roc_auc(truth = response,predictor =.pred_bad)
-
-return(list(best_fit = best_fit,best_cv_roc = best_cv_roc,best_metrics = best_metrics,best_roc = best_roc))
-}
+mp_h2o <- model_performance(explainer_h20)
+mp_log_reg <- model_performance(explainer_log_reg)
+mp_rf <- model_performance(explainer_rf)
 ```
 
 ```{r}
-lasso_evaluation <-
-  evaluate_model(
-    model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),
-    grid = grid_lasso,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
+plot(mp_h2o,mp_log_reg,mp_rf)
+plot(mp_h2o,mp_log_reg,mp_rf, geom = "boxplot")
 ```
 
-
-
-##### Ridge
+## Feature Importance
 
 ```{r}
-ridge_evaluation <-
-  evaluate_model(
-    model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),
-    grid = grid_ridge,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
+fi_h20 <- feature_importance(explainer_h20)
+fi_log_reg <- feature_importance(explainer_log_reg)
+fi_rf <- feature_importance(explainer_rf)
+
+describe(fi_h20)
+plot(fi_h20,fi_log_reg,fi_rf)
 ```
 
+## Variable explanation
 
-##### Elastic
+### Accumulated Local Effects Profiles aka ALEPlots
+
+Nota atribuída com respeito ao comprometimento da operadora em cumprir o que foi prometido e divulgado em sua publicidade.
 
 ```{r}
-elastic_evaluation <-
-  evaluate_model(
-    model = logistic_reg(mode = "classification") %>% set_engine("glmnet"),
-    grid = grid_elastic,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
+adp_h2o <- accumulated_dependency(explainer_h20,variables = "B1_2")
+adp_log_reg <- accumulated_dependency(explainer_log_reg,variables = "B1_2")
+adp_rf <- accumulated_dependency(explainer_rf,variables = "B1_2")
+
+plot(adp_h2o,adp_log_reg,adp_rf)
 ```
 
-#### KNN
+
+### Factor explanation
+
+G1: Existência de outra operadora que ofereça o mesmo serviço da atual, no local onde o entrevistado mora:
+
+1. Sim
+2. Não
+3. Não sabe
+
 
 ```{r}
-knn_evaluation <-
-  evaluate_model(
-    model = nearest_neighbor(mode = "classification") %>% set_engine("kknn"),
-    grid = grid_knn,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
+expl_h2o <- variable_response(explainer_h20,variable = "G1", type = "factor")
+expl_log_reg <- variable_response(explainer_log_reg,variable = "G1", type = "factor")
+expl_rf<- variable_response(explainer_rf,variable = "G1", type = "factor")
+
+plot(expl_h2o,expl_log_reg,expl_rf)
 ```
 
-##### Random Forest
+## Single prediction explanation 
 
 ```{r}
-random_forest_evaluation <-
-  evaluate_model(
-    model = rand_forest(mode = "classification") %>% set_engine("ranger"),
-    grid = grid_forest,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
+bd_h2o <- break_down(explainer_h20, x_dalex[1,])
+bd_log_reg <- break_down(explainer_log_reg, x_dalex[1,])
+bd_rf <- break_down(explainer_rf, x_dalex[1,])
+
+plot(bd_h2o)
+plot(bd_log_reg)
+plot(bd_rf)
 ```
-
-#### Boosting
-
-```{r}
-boosting_evaluation <-
-  evaluate_model(
-    model = boost_tree(mode = "classification") %>% set_engine("xgboost"),
-    grid = grid_forest,
-    training_data = train_data_cv,
-    testing_data = simple_test
-  )
-```
-
-```{r}
-save.image("ok.Rdata")
-```
-
